@@ -15,6 +15,7 @@ mod hsm;
 mod io;
 mod op;
 pub mod part_state;
+pub mod psk_policy;
 mod session;
 
 pub(crate) use error::*;
