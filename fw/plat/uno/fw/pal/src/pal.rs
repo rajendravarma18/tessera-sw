@@ -29,6 +29,7 @@
 //! without a copy.
 
 use core::cell::Cell;
+use core::num::NonZeroU64;
 
 use embassy_futures::select::Either;
 use embassy_futures::select::select;
@@ -41,7 +42,9 @@ use tsra_fw_hsm_pal_traits::HsmCustomDispatch;
 use tsra_fw_hsm_pal_traits::HsmDmaBuf;
 use tsra_fw_hsm_pal_traits::HsmError;
 use tsra_fw_hsm_pal_traits::HsmPal;
+use tsra_fw_hsm_pal_traits::HsmPartState;
 use tsra_fw_hsm_pal_traits::HsmResult;
+use tsra_fw_hsm_pal_traits::PskPolicySnapshot;
 use tsra_fw_static_init::static_init;
 use tsra_fw_uno_drivers_aes::AesDriver;
 // Cargo cannot drop a dependency for a feature; the BCP is unused here.
@@ -1329,6 +1332,34 @@ impl HsmPal for UnoHsmPal {
                     "init: reset=warm/fwupdate -> keep store, rearm gate1"
                 );
                 tsra_fw_uno_drivers_part_store::PartStore::rearm_unwrapping_key_required();
+                // SysTick restarts on every core boot, unlike the GSRAM store.
+                // Restart retained penalties before publishing boot completion.
+                let now = Instant::now().as_ticks();
+                for idx in 0..NUM_PARTITIONS {
+                    let result = (|| {
+                        let part = tsra_fw_uno_drivers_part_store::PartStore::partition(
+                            HsmPartId::from(idx as u8),
+                        )?;
+                        let snapshot = PskPolicySnapshot::from_bytes(part.psk_policy())?;
+                        let frequency = NonZeroU64::new(embassy_time::TICK_HZ)
+                            .ok_or(HsmError::InternalError)?;
+                        let recovered = snapshot.restart_delay(now, frequency)?;
+                        part.set_psk_policy(recovered.as_bytes())
+                    })();
+                    if let Err(_error) = result {
+                        error!(
+                            "boot",
+                            "PSK policy recovery failed: part={} error={:?}", idx, _error
+                        );
+                        // Never turn corrupt accounting or an invalid clock into
+                        // an unrestricted policy on recovery.
+                        if let Ok(part) = tsra_fw_uno_drivers_part_store::PartStore::partition(
+                            HsmPartId::from(idx as u8),
+                        ) {
+                            part.set_state(HsmPartState::Faulted);
+                        }
+                    }
+                }
             }
         }
         boot_status::set(BootStatus::Done);

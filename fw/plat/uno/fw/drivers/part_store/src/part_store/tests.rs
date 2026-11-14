@@ -122,7 +122,8 @@ fn preserves_provisioning_and_clears_tenant_state() {
             delay_factor: 5,
             allowed_attempts: 3,
             lockout_time: [9u8; 8],
-        });
+        })
+        .unwrap();
     }
     {
         let mut p = Partition(pid);
@@ -197,7 +198,7 @@ fn preserves_provisioning_and_clears_tenant_state() {
     );
     assert_eq!(p.session_meta(), &[0u8; 2], "session meta must be cleared");
 
-    let policy = p.pin_policy();
+    let policy = p.pin_policy().unwrap();
     assert_eq!(
         policy.state,
         PinPolicyState::Ready,

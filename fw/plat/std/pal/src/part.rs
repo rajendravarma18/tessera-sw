@@ -306,6 +306,9 @@ pub(crate) struct PartitionEntry {
     /// set to `Some` once `part_psk_set(psk_id=1, ..)` is invoked.
     psk_cu: Option<[u8; PSK_LEN]>,
 
+    /// Shared CO/CU policy; process-local counterpart of Uno's retained slot.
+    psk_policy: [u8; PSK_POLICY_LEN],
+
     /// Vault key ID of the Partition Trust Anchor private key.
     pta_key_id: Option<HsmKeyId>,
 
@@ -378,6 +381,7 @@ impl Default for PartitionEntry {
             unwrapping_key_id: None,
             psk_co: None,
             psk_cu: None,
+            psk_policy: [0; PSK_POLICY_LEN],
             pta_key_id: None,
             ups_key_id: None,
             local_mk_key_id: None,
@@ -1178,6 +1182,7 @@ impl StdHsmPal {
         // Rotated PSK material.
         drop_secret(&mut entry.psk_co);
         drop_secret(&mut entry.psk_cu);
+        entry.psk_policy.fill(0);
     }
 }
 
@@ -1386,6 +1391,7 @@ impl PartitionEntry {
     /// `Err(PartPropNotFound)` if the slot is absent.
     fn prop_get_bytes(&self, id: HsmPartPropId) -> HsmResult<&[u8]> {
         match id {
+            HsmPartPropId::PSK_POLICY => Ok(&self.psk_policy),
             HsmPartPropId::PART_ID => Ok(&self.id),
             HsmPartPropId::PSK_CO => Ok(self
                 .psk_co
@@ -1464,6 +1470,11 @@ impl PartitionEntry {
     /// Write a byte property; `data` length already validated.
     fn prop_set_bytes(&mut self, id: HsmPartPropId, data: &[u8]) -> HsmResult<()> {
         match id {
+            HsmPartPropId::PSK_POLICY => {
+                let snapshot = PskPolicySnapshot::from_bytes(data)?;
+                self.psk_policy.copy_from_slice(snapshot.as_bytes());
+                Ok(())
+            }
             HsmPartPropId::PSK_CO => {
                 if let Some(prev) = self.psk_co.as_mut() {
                     prev.fill(0);

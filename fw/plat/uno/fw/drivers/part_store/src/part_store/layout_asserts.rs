@@ -16,6 +16,9 @@ use super::*;
 // `NUM_PARTITIONS` of these.
 const _: () = assert!(core::mem::size_of::<Storage>() == STORE_SIZE);
 const _: () = assert!(STRIDE == STORE_SIZE);
+const _: () = assert!(core::mem::size_of::<PinPolicy>() == PSK_POLICY_LEN);
+const _: () = assert!(core::mem::offset_of!(Storage, pin_policy) == 540);
+const _: () = assert!(core::mem::offset_of!(Storage, vm_launch_guid) == 554);
 // The ECC keygen engine writes the public keys directly into these fields
 // via DMA, which requires 4-byte alignment (see `Storage` field ordering).
 const _: () = assert!(core::mem::offset_of!(Storage, ec_pub_key) % 4 == 0);

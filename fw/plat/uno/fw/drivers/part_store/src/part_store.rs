@@ -16,8 +16,10 @@ use tsra_fw_hsm_pal_traits::HsmError;
 use tsra_fw_hsm_pal_traits::HsmKeyId;
 use tsra_fw_hsm_pal_traits::HsmPartState;
 use tsra_fw_hsm_pal_traits::HsmResult;
+use tsra_fw_hsm_pal_traits::PskPolicySnapshot;
 use tsra_fw_hsm_pal_traits::DEFAULT_PSK_CO;
 use tsra_fw_hsm_pal_traits::DEFAULT_PSK_CU;
+use tsra_fw_hsm_pal_traits::PSK_POLICY_LEN;
 use tsra_fw_uno_reg_soc::io_gsram::IO_GSRAM_BASE;
 use tsra_fw_uno_reg_soc::part_store_t::PART_STORE_T_BASE;
 
@@ -384,7 +386,9 @@ struct Storage {
     /// would be UB).
     unwrapping_key_bk_valid: u8,
     unwrapping_key_bk: [u8; UNWRAPPING_KEY_BK_LEN],
-    pin_policy: PinPolicy,
+    // Raw bytes preserve the legacy 14-byte slot without reading an unchecked
+    // retained byte as a Rust enum. Decode through PskPolicySnapshot first.
+    pin_policy: [u8; PSK_POLICY_LEN],
     vm_launch_guid: [u8; GUID_LEN],
     partition_id_valid: bool,
     reserved2: u8,
@@ -711,7 +715,7 @@ impl Partition {
         self.clear_bk3_session();
         // Reset the PIN lockout policy to default (matches the reference
         // `state.disable()` and `state.migrate()`).
-        self.set_pin_policy(PinPolicy::default());
+        self.slot_mut().pin_policy = [0; PSK_POLICY_LEN];
         // Per-tenant runtime: nonce and the volatile session metadata. The
         // persistent `session_table` is deliberately *not* touched here,
         // because the right disposition depends on the caller: a disable
@@ -1102,16 +1106,49 @@ impl Partition {
 
     // ── lockout policy ───────────────────────────────────────────────────
 
-    /// Reads the partition lockout / pin policy.
+    /// Borrow the retained PSK policy bytes. Callers must validate on decode.
     #[inline(never)]
-    pub fn pin_policy(self) -> PinPolicy {
-        self.slot().pin_policy
+    pub fn psk_policy(self) -> &'static HsmDmaBuf {
+        // SAFETY: this slot is backed by DMA-accessible GSRAM.
+        unsafe { HsmDmaBuf::from_raw(&self.slot().pin_policy) }
     }
 
-    /// Sets the partition lockout / pin policy.
+    /// Validate and write a complete snapshot before returning.
     #[inline(never)]
-    pub fn set_pin_policy(mut self, policy: PinPolicy) {
-        self.slot_mut().pin_policy = policy;
+    pub fn set_psk_policy(mut self, bytes: &[u8]) -> HsmResult<()> {
+        let snapshot = PskPolicySnapshot::from_bytes(bytes)?;
+        self.slot_mut()
+            .pin_policy
+            .copy_from_slice(snapshot.as_bytes());
+        Ok(())
+    }
+
+    /// Reads the legacy PIN-policy view of the shared lockout slot.
+    #[inline(never)]
+    pub fn pin_policy(self) -> HsmResult<PinPolicy> {
+        let snapshot = PskPolicySnapshot::from_bytes(self.psk_policy())?;
+        Ok(PinPolicy {
+            state: if snapshot.is_ready() {
+                PinPolicyState::Ready
+            } else {
+                PinPolicyState::Lockout
+            },
+            delay_factor: snapshot.delay_factor(),
+            allowed_attempts: snapshot.failed_attempts(),
+            lockout_time: snapshot.lockout_deadline().to_le_bytes(),
+        })
+    }
+
+    /// Sets the legacy view, validating it before touching retained storage.
+    #[inline(never)]
+    pub fn set_pin_policy(self, policy: PinPolicy) -> HsmResult<()> {
+        let snapshot = PskPolicySnapshot::new(
+            policy.state == PinPolicyState::Ready,
+            policy.allowed_attempts,
+            policy.delay_factor,
+            u64::from_le_bytes(policy.lockout_time),
+        )?;
+        self.set_psk_policy(snapshot.as_bytes())
     }
 
     // ── Uno ext fields ───────────────────────────────────────────────────

@@ -629,6 +629,34 @@ pub const fn part_establish_cred_key_id_prop_id() -> HsmPartPropId {
     HsmPartPropId::ESTABLISH_CRED_KEY_ID
 }
 
+// ─── Retained authentication policy ──────────────────────────────────────
+
+/// Load the partition-wide CO/CU PSK policy, rejecting corrupt storage.
+pub fn part_psk_policy<P: HsmPartitionManager>(
+    pal: &P,
+    io: &P::Io,
+) -> HsmResult<crate::psk_policy::PskPolicy> {
+    let bytes = pal.part_prop_get_bytes(io, HsmPartPropId::PSK_POLICY)?;
+    let snapshot = PskPolicySnapshot::from_bytes(bytes)?;
+    Ok(crate::psk_policy::PskPolicy::from_snapshot(snapshot))
+}
+
+/// Persist a complete PSK policy synchronously, without command undo logging.
+///
+/// Call under the partition lock. Do not retain the loaded copy across an await
+/// or journal this write: command failure must not undo authentication penalties.
+/// A storage/allocation error must be propagated rather than admitting a session.
+pub fn part_set_psk_policy<P: HsmPartitionManager + HsmAlloc>(
+    pal: &P,
+    io: &P::Io,
+    policy: &crate::psk_policy::PskPolicy,
+) -> HsmResult<()> {
+    let snapshot = policy.snapshot()?;
+    let bytes = pal.dma_alloc(io, PSK_POLICY_LEN)?;
+    bytes.copy_from_slice(snapshot.as_bytes());
+    pal.part_prop_set_bytes(io, HsmPartPropId::PSK_POLICY, bytes)
+}
+
 // ─── Caller-presented secrets ─────────────────────────────────────────────
 //
 // Material that the host or the management plane hands the partition

@@ -16,15 +16,13 @@ use core::num::NonZeroU64;
 
 use tsra_fw_hsm_pal_traits::HsmError;
 use tsra_fw_hsm_pal_traits::HsmResult;
-
-/// Counted authentication failures before increasing the delay factor.
-pub const FAILURES_PER_DELAY_LEVEL: u16 = 1_000;
-
+use tsra_fw_hsm_pal_traits::PskPolicySnapshot;
 /// Duration in seconds represented by one delay-factor increment.
-pub const DELAY_INCREMENT_SECS: u64 = 60;
-
+pub use tsra_fw_hsm_pal_traits::PSK_POLICY_DELAY_SECS as DELAY_INCREMENT_SECS;
+/// Counted authentication failures before increasing the delay factor.
+pub use tsra_fw_hsm_pal_traits::PSK_POLICY_FAILURES_PER_LEVEL as FAILURES_PER_DELAY_LEVEL;
 /// Largest delay factor; the next increment rolls the policy back to Ready.
-pub const MAX_DELAY_FACTOR: u16 = 32;
+pub use tsra_fw_hsm_pal_traits::PSK_POLICY_MAX_FACTOR as MAX_DELAY_FACTOR;
 
 /// PSK authentication-policy state.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +52,31 @@ pub struct PskPolicy {
 }
 
 impl PskPolicy {
+    /// Restore a validated snapshot from the current boot's clock domain.
+    /// Boot recovery must rebase a retained snapshot before it is used.
+    pub fn from_snapshot(snapshot: PskPolicySnapshot) -> Self {
+        Self {
+            state: if snapshot.is_ready() {
+                PskPolicyState::Ready
+            } else {
+                PskPolicyState::Lockout
+            },
+            failed_attempts: snapshot.failed_attempts(),
+            delay_factor: snapshot.delay_factor(),
+            lockout_deadline: snapshot.lockout_deadline(),
+        }
+    }
+
+    /// Encode the context without exposing mutable policy fields.
+    pub fn snapshot(&self) -> HsmResult<PskPolicySnapshot> {
+        PskPolicySnapshot::new(
+            self.state == PskPolicyState::Ready,
+            self.failed_attempts,
+            self.delay_factor,
+            self.lockout_deadline,
+        )
+    }
+
     /// Current policy state.
     pub fn state(&self) -> PskPolicyState {
         self.state

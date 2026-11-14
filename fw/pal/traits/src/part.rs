@@ -789,6 +789,13 @@ impl HsmPartPropId {
     /// flag is also reset PAL-internally on partition free / NSSR.
     pub const SD_INITIALIZED: HsmPartPropId = HsmPartPropId(0x0009);
 
+    /// Shared CO/CU runtime PSK policy. Fixed 14-byte validated snapshot,
+    /// required-present and write-through. Authentication accounting must not
+    /// be enrolled in command rollback: rejected authentication is still counted.
+    /// Explicit disable/NSSR/free and POR reset it; warm/IDFU recovery retains
+    /// counters and restarts the delay in the new clock domain.
+    pub const PSK_POLICY: HsmPartPropId = HsmPartPropId(0x000A);
+
     // ── Vault references (0x0010..) ───────────────────────────────
 
     /// Vault [`HsmKeyId`](crate::HsmKeyId) for the partition identity
@@ -986,6 +993,9 @@ impl HsmPartPropId {
             Self::PART_RES_COUNT => HsmPartPropMeta::scalar(U8, Ro, Req, false),
             Self::BK3_INITIALIZED => HsmPartPropMeta::scalar(Bool, Rw, Req, false),
             Self::SD_INITIALIZED => HsmPartPropMeta::scalar(Bool, Rw, Req, false),
+            Self::PSK_POLICY => {
+                HsmPartPropMeta::fixed(crate::PSK_POLICY_LEN as u16, Rw, Req, false)
+            }
 
             // ── Vault refs (HsmKeyId as u16) ──
             Self::PART_ID_ECC_KEY_ID => VAULT_REF_RO,

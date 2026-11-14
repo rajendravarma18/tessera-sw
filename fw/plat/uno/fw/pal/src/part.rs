@@ -961,6 +961,7 @@ impl HsmPartitionManager for UnoHsmPal {
             HsmPartPropId::VM_LAUNCH_GUID => Ok(p.vm_launch_guid()),
             HsmPartPropId::PSK_CO => Ok(p.psk_co()),
             HsmPartPropId::PSK_CU => Ok(p.psk_cu()),
+            HsmPartPropId::PSK_POLICY => Ok(p.psk_policy()),
 
             // AbsentUntilSet fields — `PartPropNotFound` until provisioned.
             HsmPartPropId::CREDENTIAL if p.credential_valid() => Ok(p.credential()),
@@ -1011,6 +1012,7 @@ impl HsmPartitionManager for UnoHsmPal {
             HsmPartPropId::NONCE => p.set_nonce(data),
             HsmPartPropId::PSK_CO => p.set_psk_co(data),
             HsmPartPropId::PSK_CU => p.set_psk_cu(data),
+            HsmPartPropId::PSK_POLICY => p.set_psk_policy(data),
             HsmPartPropId::CREDENTIAL => p.set_credential(data),
             // Write-once per power cycle: a second `SetSealedBk3` without an
             // intervening clear (partition free / NSSR) returns
